@@ -1,0 +1,61 @@
+name: Build unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build-ipa.yml'
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 26 if available
+        run: |
+          echo "Available Xcode installations:"
+          ls -d /Applications/Xcode*.app 2>/dev/null || true
+          XCODE26="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -n 1)"
+          if [ -n "$XCODE26" ]; then
+            echo "Selecting $XCODE26"
+            sudo xcode-select -s "$XCODE26"
+          else
+            echo "No Xcode_26*.app found, keeping default"
+          fi
+          xcodebuild -version
+
+      - name: Archive (unsigned)
+        run: |
+          xcodebuild archive \
+            -project GestaltX.xcodeproj \
+            -target GestaltX \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath build/GestaltX.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO
+
+      - name: Package IPA
+        run: |
+          APP_PATH="build/GestaltX.xcarchive/Products/Applications/GestaltX.app"
+          test -d "$APP_PATH" || { echo "ERROR: $APP_PATH not found"; ls -R build; exit 1; }
+          rm -rf Payload
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          /usr/bin/zip -r -y GestaltX-1.0.3-unsigned.ipa Payload
+          echo "--- IPA contents ---"
+          unzip -l GestaltX-1.0.3-unsigned.ipa
+          echo "--- Version check ---"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Payload/GestaltX.app/Info.plist
+          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" Payload/GestaltX.app/Info.plist
+          /usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" Payload/GestaltX.app/Info.plist
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gestaltx-1.0.3-unsigned-ipa
+          path: GestaltX-1.0.3-unsigned.ipa
+          retention-days: 7
